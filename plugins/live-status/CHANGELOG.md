@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+- The band stacks as soon as a row of gauges would be too narrow, instead of only below 520px, so a fourth gauge no longer leaves the labels running into the percentages.
+- A gauge label is fitted to the room left beside its percentage, and gives way to the CRITICAL / HIGH word when the column is very narrow.
+
 ## 0.5.1
 - RTK per project: the band gauge shows the savings of the folder you work in (`rtk gain --project`), and the panel lists this project and all projects separately.
 

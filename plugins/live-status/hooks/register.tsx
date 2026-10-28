@@ -148,6 +148,42 @@ type Gauge = { label: string; pct: number | null; caption: string; sheen: boolea
 
 const gradFor = (pct: number | null): string => (pct === null ? 'gNone' : pct >= 85 ? 'gBad' : pct >= 60 ? 'gWarn' : 'gOk')
 
+// Labels are tracked out by .9 a character, which textWidth does not know about.
+const fitTracked = (s: string, size: number, track: number, maxW: number): string => {
+  const w = (t: string): number => textWidth(t, size) + t.length * track
+  if (w(s) <= maxW) return s
+  let out = ''
+  for (const ch of s) {
+    if (w(out + ch + '…') > maxW) break
+    out += ch
+  }
+  return out ? out + '…' : ''
+}
+
+// What a gauge column needs: its label and its percentage side by side.
+const gaugeValueW = (g: Gauge): number => textWidth(g.pct === null ? '—' : `${Math.round(g.pct)}%`, 12)
+const gaugeNeed = (gs: Gauge[]): number =>
+  Math.max(0, ...gs.map(g => textWidth(g.label, 9.5) + g.label.length * 0.9 + gaugeValueW(g) + 16))
+
+// Where the gauges sit, in the row layout and in the stacked one. The stack
+// decision reads this too, so both agree on how wide a column really is.
+// With a fourth gauge (RTK) the left block gives up some room.
+const GPAD = 14
+const GGAP = 18
+const gaugeGeom = (W: number, stack: boolean, n: number): { leftW: number; gx0: number; gw: number } => {
+  const leftW = stack
+    ? W - GPAD * 2
+    : n > 3
+      ? Math.max(200, Math.min(290, Math.round(W * 0.3)))
+      : Math.max(232, Math.min(330, Math.round(W * 0.38)))
+  const gx0 = stack ? GPAD : GPAD + leftW + 22
+  const gAreaW = stack ? W - GPAD * 2 : W - gx0 - GPAD
+  return { leftW, gx0, gw: Math.floor((gAreaW - GGAP * (n - 1)) / Math.max(1, n)) }
+}
+
+// Stack as soon as a row of gauges would be too narrow to hold label and value apart.
+const shouldStack = (W: number, gs: Gauge[]): boolean => W < 520 || gaugeGeom(W, false, gs.length).gw < gaugeNeed(gs)
+
 const CSS = `
 .card{fill:#F8F9FB;stroke:#D0D6DD}.nm{fill:#333333}.mu{fill:#626B79}.pc{fill:#232933}
 .trk{fill:#FFF4D6}.tick{fill:#626B79}.chip{fill:#F1EBFD}.chipt{fill:#5B3BB0}.chipx{fill:none;stroke:#7D8695}.rail{fill:#EDF0F2}
@@ -183,13 +219,9 @@ function cardSvg(args: {
   const taskH = tv ? 32 : 0
   const agentH = ag.rows.length ? 24 + ag.rows.length * 22 : 0
   const H = baseH + taskH + agentH
-  // With a fourth gauge (RTK) the left block gives up some room.
-  const leftW = stack ? W - PAD * 2 : gauges.length > 3 ? Math.max(200, Math.min(290, Math.round(W * 0.3))) : Math.max(232, Math.min(330, Math.round(W * 0.38)))
-  const gx0 = stack ? PAD : PAD + leftW + 22
+  const { leftW, gx0, gw } = gaugeGeom(W, stack, gauges.length)
   const gy0 = stack ? 58 : 17
-  const gAreaW = stack ? W - PAD * 2 : W - gx0 - PAD
-  const gGap = 18
-  const gw = Math.floor((gAreaW - gGap * (gauges.length - 1)) / Math.max(1, gauges.length))
+  const gGap = GGAP
 
   const phase = (period: number): string => `-${((nowMs % (period * 1000)) / 1000).toFixed(2)}s`
 
@@ -237,9 +269,12 @@ function cardSvg(args: {
       sheen = `<clipPath id="cl${i}"><rect x="${x}" y="${y + 16}" width="${fillW}" height="6" rx="3"/></clipPath>
 <g clip-path="url(#cl${i})"><rect x="${x}" y="${y + 16}" width="30" height="6" fill="url(#gSheen)" style="animation:sh${i} 1.6s ${EASE} infinite;animation-delay:${phase(1.6)}"/></g>`
     }
+    // The label never runs into the percentage, however narrow the column gets.
+    const lvlW = lvl ? textWidth(lvl, 9.5) + lvl.length * 0.9 + 9 : 0
+    const labelFit = fitTracked(g.label, 9.5, 0.9, gw - gaugeValueW(g) - lvlW - 16)
     return `
 <g>
-  <text class="mu" x="${x}" y="${y + 10}" font-family="${FONT}" font-size="9.5" font-weight="700" letter-spacing=".9">${xml(g.label)}${lvl ? `<tspan class="${pct >= 85 ? 'lv-bad' : 'lv-hi'}" dx="5">${lvl}</tspan>` : ''}</text>
+  <text class="mu" x="${x}" y="${y + 10}" font-family="${FONT}" font-size="9.5" font-weight="700" letter-spacing=".9">${xml(labelFit)}${lvl ? `<tspan class="${pct >= 85 ? 'lv-bad' : 'lv-hi'}" dx="5">${lvl}</tspan>` : ''}</text>
   <text class="pc" x="${x + gw}" y="${y + 10}" text-anchor="end" font-family="${FONT}" font-size="12" font-weight="700" font-variant-numeric="tabular-nums">${g.pct === null ? '—' : Math.round(g.pct) + '%'}</text>
   <rect class="trk" x="${x}" y="${y + 16}" width="${gw}" height="6" rx="3"/>
   ${fillW ? `<rect x="${x}" y="${y + 16}" width="${fillW}" height="6" rx="3" fill="url(#${g.good ? 'gDone' : gradFor(g.pct)})"/>` : ''}
@@ -1195,7 +1230,7 @@ export const register: Register = on => {
       ]
       const { svg, H } = cardSvg({
         W,
-        stack: W < 520,
+        stack: shouldStack(W, gauges),
         name: m ? modelName(m) : 'Claude',
         fx,
         cost: u.costUsd !== null ? fmtCost(u.costUsd) : '',

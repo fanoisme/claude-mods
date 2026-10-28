@@ -7,7 +7,7 @@
       "name": "live-status",
       "source": "./plugins/live-status",
       "description": "Live monitor above the prompt: model, effort, context, 5h/7d limits, task progress and a subagents panel.",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "category": "mod"
     }
   ]
